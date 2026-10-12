@@ -11,6 +11,10 @@ export interface RpMessage {
   authorId: string;                 // 작성 회원 (수정/삭제 권한)
   text: string;
   date: string;                     // ISO
+  /** 메신저 모양 방에서 「일반 RP」로 보낸 글 (커플홈 사용자 요청) — 말풍선 대신 원래 역극 모양으로 보인다 */
+  rp?: boolean;
+  /** 사진 메시지 (커플홈 — 메신저 방에서 상대에게 사진을 보냈다는 컨셉) — 파일 id. 글 없이 사진만도 된다 */
+  imgId?: string;
 }
 
 export interface RpRoom {
@@ -26,6 +30,8 @@ export interface RpRoom {
   createdBy: string;
   created: string;
   lastRead: Record<string, string>; // 회원별 마지막 확인 시각 — N 뱃지
+  /** 표시 방식 (커플홈 사용자 요청) — 'imsg'면 아이폰 문자(iMessage) 모양. 없으면 기본(대본형) */
+  style?: 'script' | 'imsg';
   messages: RpMessage[];
 }
 
@@ -124,3 +130,20 @@ export function rpHasNew(r: RpRoom, userId: string, msgs: RpMessage[]): boolean 
 
 /* ---------- 시드 (프로토타입 데모 계승 — admin·guest 참여) ---------- */
 export const RP_SEED: RpRoom[] = [];
+
+/* ---------- 입력 중 표시 (커플홈 사용자 요청 — 상대가 치고 있으면 입력창 위에 「캐릭터 is typing...」) ----------
+   사람마다 문서 하나(id = 방id:회원id). 글자를 칠 때 몇 초에 한 번 at을 갱신하고, 보내거나 비우면 지운다.
+   받는 쪽은 at이 TYPING_TTL 안이면 띄운다 — 방 문서를 건드리지 않으므로 서로의 저장을 덮어쓸 일이 없다 */
+export const RP_TYPING_KEY = 'ohome.rptyping.v1';
+export interface RpTyping {
+  id: string;
+  roomId: string;
+  authorId: string;        // 치고 있는 회원 (문서 주인 — 본인만 고치고 지운다)
+  charId?: string;         // 그때 고른 발화 캐릭터 — 이름 표시용
+  at: string;              // 마지막 갱신 시각 (ISO)
+  visibility: 'member';    // 로그인한 회원만 읽는다
+}
+export const RP_TYPING_SEED: RpTyping[] = [];
+/** 이 시간 안에 갱신이 없으면 입력을 멈춘 것으로 본다 (ms) */
+export const TYPING_TTL = 6000;
+export const typingId = (roomId: string, userId: string) => `${roomId}:${userId}`;

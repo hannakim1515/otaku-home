@@ -34,11 +34,33 @@ export function CropImg({ src, crop, alt }: { src: string; crop?: CropValue; alt
   const wrapRef = useRef<HTMLDivElement>(null);
   const natRef = useRef<{ w: number; h: number } | null>(null);
   const [wide, setWide] = useState<boolean | null>(null);
+  /* 지금 그리는 그림과 그 위치. src가 바뀌면 새 그림을 먼저 받아 두고, 다 받아진 뒤에 그림과 위치를 **함께** 바꾼다
+     (커플홈 사용자 제보 — 자관 그림 슬라이드를 넘길 때 옛 그림이 새 그림의 위치로 먼저 튀어 아래로 내려갔다가 바뀌었다).
+     같은 그림의 위치만 바뀌면(크롭 편집) 바로 적용한다 */
+  const [shown, setShown] = useState<{ src: string; crop?: CropValue }>({ src, crop });
   const compute = () => {
     const r = wrapRef.current?.getBoundingClientRect();
     const n = natRef.current;
     if (r && n && r.width > 1 && r.height > 1) setWide(n.w / n.h >= r.width / r.height);
   };
+  useEffect(() => {
+    if (shown.src === src) {
+      if (JSON.stringify(shown.crop) !== JSON.stringify(crop)) setShown({ src, crop });
+      return;
+    }
+    let alive = true;
+    const im = new Image();
+    im.onload = () => {
+      if (!alive) return;
+      natRef.current = { w: im.naturalWidth, h: im.naturalHeight };
+      setShown({ src, crop });
+      compute();
+    };
+    im.onerror = () => { if (alive) setShown({ src, crop }); };
+    im.src = src;
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [src, crop]);
   useEffect(() => {
     compute();
     const el = wrapRef.current;
@@ -47,26 +69,33 @@ export function CropImg({ src, crop, alt }: { src: string; crop?: CropValue; alt
     ro.observe(el);
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [src]);
+  }, [shown.src]);
   return (
     <div ref={wrapRef} style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt={alt ?? ''} draggable={false}
+      <img src={shown.src} alt={alt ?? ''} draggable={false}
         onLoad={e => { const im = e.currentTarget; natRef.current = { w: im.naturalWidth, h: im.naturalHeight }; compute(); }}
-        style={wide == null ? { opacity: 0 } : coverImgStyle(crop, wide)} />
+        style={wide == null ? { opacity: 0 } : coverImgStyle(shown.crop, wide)} />
     </div>
   );
 }
 
 /** 파일 참조 + 크롭을 적용해 표시하는 썸네일 (없으면 플레이스홀더) */
-export function CroppedBlobImg({ fileRef, crop, ph, label, alt }: {
+export function CroppedBlobImg({ fileRef, crop, ph, phStyle, label, alt }: {
   fileRef?: string; crop?: CropValue; ph?: string; label?: string; alt?: string;
+  /** 자리표시자 배경 직접 지정 (커플홈 — 캐릭터 테마색, lib/color의 phStyle) */
+  phStyle?: React.CSSProperties;
 }) {
   const url = useBlobUrl(fileRef);
-  if (!url) {
-    return <div className={`ph ${ph ?? ''}`} style={{ width: '100%', height: '100%' }}>{label && <span>{label}</span>}</div>;
+  /* 참조가 바뀌어 새 주소를 받는 동안은 이전 그림을 그대로 둔다 (커플홈 사용자 제보 — 자관 그림 슬라이드를 넘길 때
+     자리표시자(어두운 그라데이션)가 한 번 번쩍였다). 참조를 아예 비우면 같이 비운다 */
+  const [kept, setKept] = useState<string | undefined>(url);
+  useEffect(() => { if (url) setKept(url); else if (!fileRef) setKept(undefined); }, [url, fileRef]);
+  const shown = url ?? kept;
+  if (!shown) {
+    return <div className={`ph ${ph ?? ''}`} style={{ width: '100%', height: '100%', ...phStyle }}>{label && <span>{label}</span>}</div>;
   }
-  return <CropImg src={url} crop={crop} alt={alt} />;
+  return <CropImg src={shown} crop={crop} alt={alt} />;
 }
 
 export function CropEditor({ open, src, aspect, aspectLabel, initial, onClose, onApply }: {

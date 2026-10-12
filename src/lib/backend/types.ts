@@ -51,7 +51,12 @@ export interface Backend {
   signUp(id: string, password: string, nickname: string): Promise<{ ok: boolean; error?: string }>;
   signOut(): Promise<void>;
   resetPassword(email: string): Promise<{ ok: boolean; error?: string }>;
-  updateProfile(patch: { nickname?: string; avatarUrl?: string | null; avatarColor?: string | null }): Promise<{ ok: boolean; error?: string }>;
+  /** 내 정보 수정 — 닉네임·프로필 사진·색, 그리고 비밀번호(현재 비밀번호 확인 뒤 새 비밀번호).
+   *  비밀번호 항목은 여태 타입에 없어 서버 모드에서 **조용히 무시되고 「변경되었습니다」만 떴다** (커플홈 사용자 제보 — "비밀번호가 변경이 안 된다") */
+  updateProfile(patch: {
+    nickname?: string; avatarUrl?: string | null; avatarColor?: string | null;
+    currentPassword?: string; newPassword?: string;
+  }): Promise<{ ok: boolean; error?: string }>;
   /** 첫 계정을 이 홈의 관리자로 등록 (관리자가 아직 없을 때만) */
   claimOwner(): Promise<{ ok: boolean; error?: string }>;
   /** 가입 회원 목록 — 역극 참여자 선택·회원 관리 화면용.
@@ -61,6 +66,8 @@ export interface Backend {
 
   /* ---- 목록(콘텐츠) ---- */
   fetchList<T extends ListItem>(coll: string): Promise<T[]>;
+  /** 문서 한 건 (커플홈 — RP LOG 본문처럼 큰 문서가 모인 컬렉션은 목록 통째로 받으면 느리다). 없거나 읽을 권한이 없으면 null */
+  fetchOne<T extends ListItem>(coll: string, id: string): Promise<T | null>;
   syncList<T extends ListItem>(coll: string, prev: T[], next: T[], uid: string | null): Promise<void>;
   /** 이미 저장된 행의 공개범위만 다시 계산해 덮어쓴다 (v2.0) — 메뉴를 비공개로 바꾼 뒤
    *  「글에도 적용」을 누르면 돈다. 내용(data)·순서(sort)는 건드리지 않는다. */
@@ -119,6 +126,13 @@ export const COLLECTION_OF: Record<string, string> = {
   // 역극 발화 — 방 안이 아니라 자기 문서로 (v2.0). 같은 이유로, 방 안에 두면 말할 때마다
   // 방을 UPDATE 해야 해서 남이 만든 방에서 참여자가 발화할 수 없었다
   'ohome.rpmsgs.v1': 'rp_messages',
+  // 감상타래 글 — 타래 안이 아니라 자기 문서로 (커플홈). 같은 이유로, 타래 안에 두면
+  // 상대 오너가 관리자 타래에 이어 쓸 수 없다 (두 사람이 같이 쓰는 타래)
+  'ohome.thrposts.v1': 'thread_posts',
+  // Videos 게시판 (커플홈 사용자 요청) — 영상 하나를 파일·링크로 올리는 글. 갤러리와 따로 둔다
+  'ohome.videos.v1': 'videos',
+  // 역극 입력 중 표시 (커플홈) — 사람마다 문서 하나, 임시값. 백업 대상 아님
+  'ohome.rptyping.v1': 'rp_typing',
   // 알림 — 기기 보관이던 것을 서버로 (v2.0 포크 제보 「알림이 안 와요」).
   // 행 주인(authorId)을 받는 사람으로 적어, 받는 사람 계정이 어느 기기에서나 받아 간다
   'ohome.notif.v1': 'notifications',
@@ -181,12 +195,17 @@ export function metaOf(item: ListItem, uid: string | null, floor = 'public') {
  * (v2.0 사용자 발견 — 댓글 문제와 같은 뿌리).
  */
 export function editorIdsOf(item: ListItem): string[] {
+  // 문서에 바로 적어 둔 평평한 목록 (커플홈 — RP LOG: 등록 권한이 있는 회원은 수정도, trpgPerm.ts)
+  const flat = Array.isArray(item.editorIds)
+    ? (item.editorIds as unknown[]).filter((s): s is string => typeof s === 'string')
+    : [];
   const grants = item.grants;
-  if (!Array.isArray(grants)) return [];
-  return grants
+  if (!Array.isArray(grants)) return flat;
+  const fromGrants = grants
     .filter((g): g is { userId: string; level: string } =>
       !!g && typeof g === 'object'
       && typeof (g as { userId?: unknown }).userId === 'string'
       && (g as { level?: unknown }).level === 'edit')
     .map(g => g.userId);
+  return [...new Set([...flat, ...fromGrants])];
 }
